@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata provided in this file."
+
+title: "Reset Control Toolbox"
+type: software
+version: 1.0.0
+
+authors:
+  - family-names: "Hosseini"
+    given-names: "Ali"
+    affiliation: "Delft University of Technology"
+
+abstract: >
+  MATLAB implementations of analysis and design tools for reset control
+  systems, including CgLp design, higher-order sinusoidal-input describing
+  functions (HOSIDFs), closed-loop pseudo-sensitivity, frequency-domain
+  stability assessment, nonlinearity quantification, reliability metrics,
+  and shaping-filter design.
+
+license: BSD-3-Clause
+
+repository-code: "https://github.com/AliHosseini44/reset-control-toolbox"
+
+keywords:
+  - reset control
+  - nonlinear control
+  - CgLp
+  - HOSIDF
+  - pseudo-sensitivity
+  - robust control
+  - shaping filter
+  - MATLAB
