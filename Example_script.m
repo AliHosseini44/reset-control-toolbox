@@ -9,11 +9,11 @@
 %
 %   1) CgLp design using calc_omega_f
 %   2) Reset HOSIDFs using computeResetHOSIDF_SF
-%   3) Closed-loop pseudo-sensitivity using computePseudoSens_SF
-%   4) Stability assessment using theta_deg
-%   5) Nonlinearity quantification using sigma_2
+%   3) Closed-loop pseudo-sensitivity using ResetScope
+%   4) Stability assessment using ResetScope
+%   5) Nonlinearity quantification using ResetScope (sigma_2)
 %   6) Nonlinearity shaping using complementary pre/post filters
-%   7) Reliability assessment using sigma_t and sigma_d
+%   7) Reliability assessment using ResetScope (sigma_t and sigma_d)
 %   8) Shaping-filter design using design_Cs_maxPhase
 %
 % The script is intentionally kept as one sequence of MATLAB commands so
@@ -22,11 +22,12 @@
 % Required MATLAB functions:
 %   calc_omega_f.m
 %   computeResetHOSIDF_SF.m
-%   computePseudoSens_SF.m
-%   computePseudoSens_SF_withMetrics.m
+%   ResetScope.m
 %   convertToLure_SF.m
-%   theta_deg.m
 %   design_Cs_maxPhase.m
+%
+% Optional sensitivity-only analysis function:
+%   computePseudoSens_SF.m
 %
 % Required MATLAB toolboxes:
 %   Control System Toolbox
@@ -35,6 +36,17 @@
 clear;
 clc;
 close all;
+
+
+%% Closed-loop Structure
+
+%
+%               ---------> R --------
+%   U_in        |          |         |               U_out
+%    ---->Cpre--| ----Cs---          + --> Cpos --> P -->
+%               |                    |
+%               ---------> Cpar ------
+%
 
 %% Plot settings
 % LaTeX formatting is used for all axes and legends. The same frequency
@@ -156,7 +168,7 @@ grid on;
 %% Reset-analysis settings
 % nrHOSIDFsMax limits the number of harmonics used in the closed-loop
 % reconstruction. Fs and overSampleRatio determine the time resolution used
-% by computePseudoSens_SF and computePseudoSens_SF_withMetrics.
+% by ResetScope.
 nrHOSIDFsMax = 31;
 Fs = 2000;                     % Sampling frequency [Hz]
 overSampleRatio = 10;
@@ -196,8 +208,8 @@ D_r = w_l/(w_f-w_l);
 k_c = (w_f-w_l)/w_f;
 C_c = (1+s/w_l)/(1+s/w_f);
 
-% Strictly proper reset element. In computePseudoSens_SF, the direct term
-% D_r is represented by the parallel linear path C_par.
+% Strictly proper reset element. In ResetScope, the direct term D_r is
+% represented by the parallel linear path C_par; pass Dr = 0 to ResetScope.
 sysR = ss(-w_r,1,w_r,0);
 
 % Blocks used in the closed-loop representation.
@@ -298,8 +310,18 @@ frfCpre  = ones(size(f));
 frfCpar  = D_r*ones(size(f));
 frfCpos  = reshape(squeeze(freqresp(C_pos,w)),1,[]);
 
-[pseudoMag,~,Swz,~,~] = computePseudoSens_SF( ...
-    f,sysR,A_rho,frfCs,frfCpre,frfCpar,frfCpos,frfPlant, ...
+% For pseudo-sensitivity and HOSISFs alone, computePseudoSens_SF can be
+% used instead. It skips the additional stability and performance/reliability metrics:
+% [pseudoMag_basic,nrResets_basic,Swz_basic,Swy_basic,Ln_basic] = ...
+%     computePseudoSens_SF( ...
+%     f,sysR,A_rho,frfCs,frfCpre,frfCpar,frfCpos,frfPlant, ...
+%     Fs,nrHOSIDFsMax,overSampleRatio);
+% The alternative is commented out to avoid calculating both versions.
+%
+% ResetScope also returns the stability angle and the stability-test flag.
+% Dr = 0 because the physical feedthrough D_r is already in frfCpar.
+[pseudoMag,~,Swz,~,~,~,~,~,theta_N,stable_reset] = ResetScope( ...
+    f,sysR,0,A_rho,frfCs,frfCpre,frfCpar,frfCpos,frfPlant, ...
     Fs,nrHOSIDFsMax,overSampleRatio);
 
 % Linear PID sensitivity for comparison.
@@ -319,43 +341,10 @@ xlim([0.1 2000]);
 grid on;
 
 %% 4. Stability assessment
-% theta_deg evaluates the angle theta_N used by the frequency-domain
-% stability condition developed in the thesis. The condition requires the
-% total angular spread to remain below 180 deg and theta_N to remain inside
-% one of the admissible angular sectors.
-
-% Base-linear reset element, including D_r.
-R_bl = w_r/(s+w_r)+D_r;
-frfRbl = reshape(squeeze(freqresp(R_bl,w)),1,[]);
-
-% No shaping filter is used in the reset-trigger path for the controller
-% designed in Section 3, hence C_s = 1.
-theta_N = theta_deg( ...
-    frfPlant,ones(size(f)),frfCpos,zeros(size(f)), ...
-    ones(size(f)),frfRbl,D_r);
-
-% Express theta_N on the branch used by the stability condition,
-% theta_N in [-90,270) deg.
-theta_N(theta_N < -90) = theta_N(theta_N < -90) + 360;
-theta_N(theta_N >= 270) = theta_N(theta_N >= 270) - 360;
-
-theta_min = min(theta_N);
-theta_max = max(theta_N);
-theta_spread = theta_max-theta_min;
-
-% Sufficient frequency-domain stability condition for the first-order
-% reset element: the angular spread must be below 180 deg and theta_N must
-% remain inside one of the admissible angular sectors.
-stable_reset = (theta_spread < 180) && ...
-    (all(theta_N>-90 & theta_N<180) || ...
-     all(theta_N>0 & theta_N<270));
-
-fprintf('\nStability assessment\n');
-fprintf('--------------------\n');
-fprintf('Certified           : %d\n',stable_reset);
-fprintf('Angular spread      : %.2f deg\n',theta_spread);
-fprintf('Minimum theta_N     : %.2f deg\n',theta_min);
-fprintf('Maximum theta_N     : %.2f deg\n',theta_max);
+% ResetScope has already evaluated the first-order reset stability test
+% and returned theta_N on [-90,270) deg and its logical flag stable_reset.
+% The function also prints the angular spread and stability-test result.
+% The same C_s = 1 configuration used in Section 3 is plotted below.
 
 figure('Color','w');
 semilogx(f,theta_N,'Color',cReset);
@@ -402,15 +391,11 @@ frfCpre_aggr = ones(size(f));
 frfCpar_aggr = D_r_aggr*ones(size(f));
 frfCpos_aggr = reshape(squeeze(freqresp(C_pos_aggr,w)),1,[]);
 
-[pseudoMag_aggr,~,Swz_aggr,~,~] = computePseudoSens_SF( ...
-    f,sysR_aggr,A_rho,frfCs_aggr, ...
+% ResetScope returns sigma_2 (in percent) along with the HOSISFs.
+[pseudoMag_aggr,~,Swz_aggr,~,~,sigma_2] = ResetScope( ...
+    f,sysR_aggr,0,A_rho,frfCs_aggr, ...
     frfCpre_aggr,frfCpar_aggr,frfCpos_aggr,frfPlant, ...
     Fs,nrHOSIDFsMax,overSampleRatio);
-
-% sigma_2 measures the contribution of higher-order harmonics relative to
-% the first-order closed-loop response. The result is expressed in percent.
-sigma_2 = (sqrt(sum(abs(Swz_aggr).^2,1,'omitnan')) ...
-    - abs(Swz_aggr(1,:)))./abs(Swz_aggr(1,:))*100;
 
 figure('Color','w');
 subplot(211)
@@ -502,13 +487,10 @@ frfCpre_F = reshape(squeeze(freqresp(F,w)),1,[]);
 frfCpar_F = D_r_aggr*ones(size(f));
 frfCpos_F = reshape(squeeze(freqresp(C_pos_aggr*F_inv,w)),1,[]);
 
-[~,~,Swz_F,~,~] = computePseudoSens_SF( ...
-    f,sysR_aggr,A_rho,frfCs_aggr, ...
+[~,~,Swz_F,~,~,sigma_2_F] = ResetScope( ...
+    f,sysR_aggr,0,A_rho,frfCs_aggr, ...
     frfCpre_F,frfCpar_F,frfCpos_F,frfPlant, ...
     Fs,nrHOSIDFsMax,overSampleRatio);
-
-sigma_2_F = (sqrt(sum(abs(Swz_F).^2,1,'omitnan')) ...
-    - abs(Swz_F(1,:)))./abs(Swz_F(1,:))*100;
 
 figure('Color','w');
 semilogx(f,sigma_2,'Color',cPID);
@@ -528,8 +510,8 @@ grid on;
 % design_Cs_maxPhase.
 
 [~,nrResets_0,~,~,~,~,sigma_d_0,sigma_t_0] = ...
-    computePseudoSens_SF_withMetrics( ...
-    f,sysR_aggr,A_rho,frfCs_aggr, ...
+    ResetScope( ...
+    f,sysR_aggr,0,A_rho,frfCs_aggr, ...
     frfCpre_F,frfCpar_F,frfCpos_F,frfPlant, ...
     Fs,nrHOSIDFsMax,overSampleRatio);
 
@@ -601,8 +583,8 @@ grid on;
 %% Recalculate reliability metrics with the designed shaping filter
 
 [~,nrResets_1,~,~,~,~,sigma_d_1,sigma_t_1] = ...
-    computePseudoSens_SF_withMetrics( ...
-    f,sysR_aggr,A_rho,frfCs_rel, ...
+    ResetScope( ...
+    f,sysR_aggr,0,A_rho,frfCs_rel, ...
     frfCpre_F,frfCpar_F,frfCpos_F,frfPlant, ...
     Fs,nrHOSIDFsMax,overSampleRatio);
 
