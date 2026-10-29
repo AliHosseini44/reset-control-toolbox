@@ -24,8 +24,8 @@ reset-control-toolbox/
 │
 ├── README.md
 │
-├── examples/
-│   └── Example_script.m
+├── Example_script.m
+│    
 │
 └── functions/
     ├── calc_omega_f.m
